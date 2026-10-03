@@ -11,10 +11,10 @@ public/
   vendor/                # Leaflet và Lucide được vendored local
 src/
   app.js                 # state, routing và màn hình mobile
-  config.js              # API base URL, auth và endpoint map
+  config.js              # API base URL, WebSocket, polling
   styles.css             # design system và responsive layout
 server/
-  server.js              # static development server
+  server.js              # static server + proxy /api/v1 và /ws sang backend
 docs/
   SECO - Design Document.docx
   SECO - MasterSheet.xlsx
@@ -25,28 +25,40 @@ README.md
 ## Chạy local
 
 ```bash
-npm run dev
+npm run dev                                         # API đã deploy (Render)
+SECO_API_ORIGIN=http://localhost:8000 npm run dev   # API chạy local
 ```
 
-Mở `http://localhost:4173` trên trình duyệt. App không cần cài dependency npm; `server/server.js` phục vụ entry point trong `public/`, mã nguồn trong `src/` và asset trong `public/assets/`.
+Mở `http://localhost:4173` (giao diện khung điện thoại; trên điện thoại thật thì toàn màn hình). `server/server.js` phục vụ `public/` và `src/`, đồng thời proxy `/api/v1` (REST) và `/ws` (WebSocket realtime) sang backend, nên trình duyệt không gặp CORS. Không cần cài dependency npm.
 
-## Phạm vi đã dựng
+Tài khoản demo (mật khẩu `seco`): `user@seco.com` (member), `tech@seco.com` (kỹ thuật viên). Tài khoản ADMIN dùng web admin, app sẽ từ chối.
 
-- `FE-U01` → `FE-U09`: đăng nhập, bản đồ/danh sách trạm, chi tiết trạm, thiết lập ngân sách, phiên sạc realtime từ backend, kết quả phiên, ví, lịch sử giao dịch/phiên và tài khoản.
-- `MB-01` → `MB-05`: không gian Technician, thông báo sự cố, chi tiết fault/telemetry, checklist bảo trì và báo cáo sửa chữa.
-- Trang bổ sung: quên mật khẩu, bộ lọc trạm, chia sẻ trạm, QR ví, thẻ RFID, cài đặt thông báo/ngôn ngữ, đổi mật khẩu, quản lý xe, trợ giúp và bài viết FAQ.
-- Luồng demo: đăng nhập → chọn trạm → chọn ngân sách → quẹt RFID → cắm sạc → dừng phiên → xem kết quả/lịch sử; hoặc chuyển sang Technician để xử lý `SECO-04` từ fault đến report.
+## Phạm vi theo nghiệp vụ
 
-Các ảnh trong `public/assets/template/` được giữ nguyên và dùng làm nguồn tham chiếu trực tiếp cho design system.
+Mọi màn hình đọc API thật; không còn dữ liệu demo cứng.
 
-Màn hình `Trạm` dùng Leaflet với tile OpenStreetMap thật. App đọc `GET /api/v1/stations`; response backend dùng `station_id`, `latitude`, `longitude`, `status`, `availability` và được chuẩn hóa trước khi hiển thị. Marker click sẽ mở chi tiết station tương ứng và bản đồ tự zoom theo nhóm trạm thật. Tab `Sạc` và `Lịch sử` được hợp thành một tab: khi có phiên đang chạy sẽ hiển thị realtime, còn lại hiển thị lịch sử sạc.
+**Member (USER)**: ứng dụng chỉ **theo dõi và báo cáo**, không điều khiển việc sạc. Sạc làm hoàn toàn tại trạm: cắm sạc, quẹt thẻ RFID, chọn ngân sách trên màn hình trạm (tuỳ chọn), rút sạc để kết thúc.
 
-Khi trình duyệt cấp quyền GPS, vị trí người dùng được hiển thị bằng marker riêng trên bản đồ. Mô tả ngắn của trạm có nút `Chỉ đường`, mở Google Maps với tọa độ hiện tại và tọa độ trạm; nếu chưa có GPS, Google Maps vẫn mở theo điểm đến.
+| Tab | Màn hình | API |
+|---|---|---|
+| Trạm | Bản đồ (Leaflet + OpenStreetMap), danh sách, lọc Sẵn sàng / Yêu thích, chi tiết trạm (trạng thái, giá hiện hành, địa chỉ, chỉ đường), **báo trạm hư hỏng**, đánh dấu yêu thích | `GET /stations`, `GET/PUT/DELETE /member/favorite-stations`, `POST /member/support-tickets` |
+| Phiên sạc | Phiên đang sạc theo thời gian thực (điện năng, chi phí, ngân sách đã chọn trên trạm), kết quả khi phiên kết thúc, lịch sử và chi tiết phiên | `GET /member/charging/current`, `GET /member/charging/{id}`, `GET /member/sessions` |
+| Ví | Số dư, nạp tiền sandbox, giao dịch (lọc), chi tiết giao dịch | `GET /member/wallet`, `POST /member/topup`, `GET /member/transactions[/{id}]` |
+| Tôi | Thông tin cá nhân, thẻ RFID (tạm khoá / mở / **báo mất**), trạm yêu thích, các báo cáo sự cố đã gửi, thông báo, đổi mật khẩu, FAQ | `PATCH /auth/me`, `/member/rfid-cards/*`, `/member/support-tickets/*`, `/notifications/*`, `POST /auth/change-password` |
 
-## Cấu hình API
+Phiên sạc hiện trên ứng dụng ngay khi trạm báo bắt đầu (WebSocket `member_session_updated`, polling dự phòng 5 giây) và chuyển sang màn kết quả khi trạm báo kết thúc.
 
-`src/config.js` đang dùng `/api/v1` cùng proxy của `server/server.js`, vì vậy chạy local không bị lỗi CORS với backend Render. Proxy chuyển tiếp request tới `https://seco-backend-api.onrender.com`; nếu frontend được deploy sau cùng domain với backend, có thể đổi `apiBaseUrl` sang `remoteApiBaseUrl`. Các request dùng `apiRequest()` và tự thêm Bearer token sau khi login.
+**Kỹ thuật viên (TECHNICIAN)**:
 
-Luồng member thật dùng `POST /member/rfid/verify`, `POST /member/charging/start`, `POST /member/charging/{session_id}/stop`, `GET /member/charging/current`, `GET /member/wallet`, `POST /member/topup`, `GET /member/transactions` và `GET /member/sessions`. Backend hiện chưa công bố WebSocket trong OpenAPI, nên phiên đang chạy được đồng bộ bằng polling `GET /member/charging/current` mỗi 5 giây. Màn hình RFID nhận UID từ phần cứng/đầu đọc rồi mới gọi API, không giả định UID demo.
+| Tab | Màn hình | API |
+|---|---|---|
+| Yêu cầu | Hàng đợi yêu cầu hỗ trợ (đang chờ / của tôi / đã xong) → chi tiết: member (gọi điện), trạng thái trạm lúc gửi, telemetry, lỗi đang mở → Nhận xử lý → Hoàn tất kèm ghi chú | `/technician/support-tickets/*` |
+| Trạm | Trạm ưu tiên cần đến (lỗi, bảo trì, offline, có yêu cầu) → chi tiết: telemetry, lỗi đang mở, yêu cầu, lịch sử bảo trì, chỉ đường | `GET /technician/stations[/{id}]` |
+| Thông báo | Lỗi trạm, yêu cầu hỗ trợ mới | `/notifications/*` |
+| Tôi | Thông tin cá nhân, lịch sử công việc (yêu cầu đã xử lý, bảo trì), thẻ kỹ thuật viên, đổi mật khẩu | `GET /technician/maintenance`, `/technician/rfid-cards/*` |
 
-Thông báo phiên sạc, thông báo trạm yêu thích và thông báo sự cố Technician dùng Web Notification của trình duyệt; môi trường production cần cấp quyền notification và có thể thay lớp này bằng FCM/APNs. OpenAPI hiện chưa có nhóm endpoint Technician riêng, nên các màn hình bảo trì vẫn giữ workflow mobile và chưa gửi mutation lên backend cho đến khi BE công bố contract tương ứng.
+Vào / ra bảo trì làm **tại trạm** (quẹt thẻ kỹ thuật viên + giữ STOP 3 giây), không làm trong app.
+
+**Chung:** đăng nhập, quên mật khẩu (`POST /auth/forgot-password` trả mật khẩu tạm 10 phút, rồi `POST /auth/reset-password` như đổi mật khẩu), hộp thư thông báo realtime qua `/ws`.
+
+Đã bỏ khỏi bản prototype vì ngoài phạm vi dự án hoặc backend không có: đặt ngân sách / bắt đầu / dừng sạc trong ứng dụng (làm tại trạm), xe của tôi, QR ví, chia sẻ trạm, cài đặt ngôn ngữ / bật tắt thông báo, thiết bị đã đăng nhập, checklist / ảnh / biên bản sửa chữa và nhận "nhiệm vụ" lỗi giả lập phía kỹ thuật viên.
